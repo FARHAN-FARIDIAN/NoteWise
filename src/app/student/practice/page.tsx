@@ -10,8 +10,8 @@ import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle, CardFooter } from '@/components/ui/card';
 import { useToast } from '@/hooks/use-toast';
-import { CalendarIcon, ChevronLeft, ChevronRight, Save, BookOpen, Clock, Loader2, AlertCircle } from 'lucide-react';
-import { format, isValid } from 'date-fns';
+import { CalendarIcon, ChevronLeft, ChevronRight, Save, BookOpen, Clock, Loader2, AlertCircle, Ban } from 'lucide-react';
+import { format, isValid, parseISO, addDays, startOfDay, endOfDay, isWithinInterval, isBefore, isAfter } from 'date-fns';
 import { faIR } from 'date-fns/locale/fa-IR';
 import { useState, useEffect } from 'react';
 import type { DailyPracticeLog, RoutineTemplate, StudentData, PracticeSection } from '@/types';
@@ -50,6 +50,11 @@ export default function DailyPracticeLogPage() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [assignedRoutineDetails, setAssignedRoutineDetails] = useState<RoutineTemplate | null>(null);
 
+  const [minLogDate, setMinLogDate] = useState<Date | null>(null);
+  const [maxLogDate, setMaxLogDate] = useState<Date | null>(null);
+  const [isCurrentDateLoggable, setIsCurrentDateLoggable] = useState(true);
+
+
   const { control, register, handleSubmit, reset, setValue, formState: { errors } } = useForm<DailyPracticeLogInputs>({
     resolver: zodResolver(dailyPracticeLogSchema),
     defaultValues: {
@@ -67,6 +72,12 @@ export default function DailyPracticeLogPage() {
   useEffect(() => {
     setIsLoading(true);
     if (!student || !student.currentRoutineId) {
+      setAssignedRoutineDetails(null);
+      setIsCurrentDateLoggable(false); // No routine, so not loggable
+      setMinLogDate(null);
+      setMaxLogDate(null);
+      replace([]); // Clear fields if no routine
+      setValue("dailyNotes", '');
       setIsLoading(false);
       return;
     }
@@ -74,6 +85,28 @@ export default function DailyPracticeLogPage() {
     const allTemplates = getFromLocalStorage<RoutineTemplate[]>(LOCAL_STORAGE_ROUTINES_KEY, []);
     const studentRoutine = allTemplates.find(r => r.id === student.currentRoutineId);
     setAssignedRoutineDetails(studentRoutine || null);
+
+    let currentMinLogDate: Date | null = null;
+    let currentMaxLogDate: Date | null = null;
+    let loggableForCurrentDate = false;
+
+    if (student.currentRoutineAssignmentDate && isValid(parseISO(student.currentRoutineAssignmentDate))) {
+      const assignmentStart = startOfDay(parseISO(student.currentRoutineAssignmentDate));
+      currentMinLogDate = assignmentStart;
+      currentMaxLogDate = endOfDay(addDays(assignmentStart, 7)); // 8-day window (day 0 to day 7)
+      
+      if (isValid(currentDate) && isValid(currentMinLogDate) && isValid(currentMaxLogDate)) {
+        loggableForCurrentDate = isWithinInterval(startOfDay(currentDate), { start: currentMinLogDate, end: currentMaxLogDate });
+      }
+    } else {
+      // If no assignment date, perhaps default to unloggable or some other rule.
+      // For now, if date is missing, consider it not loggable according to this new rule.
+      loggableForCurrentDate = false;
+    }
+    
+    setMinLogDate(currentMinLogDate);
+    setMaxLogDate(currentMaxLogDate);
+    setIsCurrentDateLoggable(loggableForCurrentDate);
 
     const allLogs = getFromLocalStorage<DailyPracticeLog[]>(LOCAL_STORAGE_PRACTICE_LOGS_KEY, []);
     const dateString = format(currentDate, "yyyy-MM-dd");
@@ -90,6 +123,10 @@ export default function DailyPracticeLogPage() {
         timeSpentMinutes: 0,
       }));
       setValue("dailyNotes", '');
+    } else {
+      // No routine details, clear fields
+       replace([]);
+       setValue("dailyNotes", '');
     }
     
     replace(initialLogData);
@@ -101,6 +138,10 @@ export default function DailyPracticeLogPage() {
   const onSubmit: SubmitHandler<DailyPracticeLogInputs> = async (data) => {
     if (!student) {
         toast({ title: t('student.practice.toast.error.title'), description: t('student.practice.toast.error.studentNotFound'), variant: "destructive" });
+        return;
+    }
+    if (!isCurrentDateLoggable) {
+        toast({ title: t('student.practice.toast.error.title'), description: t('student.practice.logDateError.notLoggable'), variant: "destructive" });
         return;
     }
     setIsSubmitting(true);
@@ -138,11 +179,35 @@ export default function DailyPracticeLogPage() {
     const newDate = new Date(currentDate);
     if (direction === 'prev') {
       newDate.setDate(currentDate.getDate() - 1);
+      if (minLogDate && isBefore(startOfDay(newDate), startOfDay(minLogDate))) {
+        // Do not navigate before minLogDate, or set to minLogDate
+        // setCurrentDate(minLogDate); // Option: snap to boundary
+        return; // Option: just don't navigate
+      }
     } else {
       newDate.setDate(currentDate.getDate() + 1);
+      if (maxLogDate && isAfter(startOfDay(newDate), startOfDay(maxLogDate))) {
+         // Do not navigate after maxLogDate
+        return;
+      }
     }
     setCurrentDate(newDate);
   };
+  
+  const canNavigatePrev = !minLogDate || !isBefore(startOfDay(currentDate), startOfDay(addDays(minLogDate,1)) );
+  const canNavigateNext = !maxLogDate || !isAfter(startOfDay(currentDate), startOfDay(addDays(maxLogDate,-1)) );
+
+  const PrevDayButton = () => (
+    <Button variant="outline" size="icon" onClick={() => navigateDate('prev')} title={t('student.practice.previousDay')} disabled={!canNavigatePrev}>
+      {language === 'fa' ? <ChevronRight className="h-5 w-5" /> : <ChevronLeft className="h-5 w-5" />}
+    </Button>
+  );
+
+  const NextDayButton = () => (
+    <Button variant="outline" size="icon" onClick={() => navigateDate('next')} title={t('student.practice.nextDay')} disabled={!canNavigateNext}>
+      {language === 'fa' ? <ChevronLeft className="h-5 w-5" /> : <ChevronRight className="h-5 w-5" />}
+    </Button>
+  );
 
   if (isLoading) {
     return (
@@ -175,9 +240,7 @@ export default function DailyPracticeLogPage() {
       <Card className="shadow-xl">
         <CardHeader className="bg-muted/30">
           <div className="flex justify-between items-center mb-2">
-            <Button variant="outline" size="icon" onClick={() => navigateDate('prev')} title={t('student.practice.previousDay')}>
-              <ChevronLeft className="h-5 w-5" />
-            </Button>
+            {language === 'fa' ? <NextDayButton /> : <PrevDayButton />}
             <div className="text-center">
               <h2 className="text-xl font-semibold flex items-center justify-center">
                 <CalendarIcon className="mr-2 h-5 w-5 text-primary" />
@@ -185,14 +248,35 @@ export default function DailyPracticeLogPage() {
               </h2>
               <p className="text-2xl font-bold text-primary">{isValid(currentDate) ? format(currentDate, "EEEE, MMMM d, yyyy", { locale: language === 'fa' ? faIR : undefined }) : "Invalid Date"}</p>
             </div>
-            <Button variant="outline" size="icon" onClick={() => navigateDate('next')} title={t('student.practice.nextDay')}>
-              <ChevronRight className="h-5 w-5" />
-            </Button>
+            {language === 'fa' ? <PrevDayButton /> : <NextDayButton />}
           </div>
            <CardDescription className="text-center">
             {t('student.practice.routineName', {routineName: assignedRoutineDetails.templateName})}
           </CardDescription>
         </CardHeader>
+
+        {!isCurrentDateLoggable && student.currentRoutineAssignmentDate && minLogDate && maxLogDate && (
+            <Alert variant="destructive" className="m-4">
+              <Ban className="h-4 w-4" />
+              <AlertTitle>{t('student.practice.logDateError.title')}</AlertTitle>
+              <AlertDescription>
+                {t('student.practice.logDateError.description', {
+                    minDate: format(minLogDate, "PPP", { locale: language === 'fa' ? faIR : undefined }),
+                    maxDate: format(maxLogDate, "PPP", { locale: language === 'fa' ? faIR : undefined })
+                })}
+              </AlertDescription>
+            </Alert>
+        )}
+         {!student.currentRoutineAssignmentDate && student.currentRoutineId && (
+             <Alert variant="destructive" className="m-4">
+                <Ban className="h-4 w-4" />
+                <AlertTitle>{t('student.practice.logDateError.title')}</AlertTitle>
+                <AlertDescription>
+                    {t('student.practice.logDateError.missingAssignmentDate')}
+                </AlertDescription>
+            </Alert>
+         )}
+
 
         <form onSubmit={handleSubmit(onSubmit)}>
           <CardContent className="space-y-8 pt-6">
@@ -225,6 +309,7 @@ export default function DailyPracticeLogPage() {
                         placeholder={t('student.practice.timeSpent.unit')}
                         className={`w-28 ${errors.logData?.[index]?.timeSpentMinutes ? "border-destructive" : ""}`}
                         {...register(`logData.${index}.timeSpentMinutes` as const)}
+                        disabled={!isCurrentDateLoggable}
                       />
                       <span className="text-sm text-muted-foreground">{t('student.practice.timeSpent.unit')}</span>
                     </div>
@@ -242,11 +327,12 @@ export default function DailyPracticeLogPage() {
                 placeholder={t('student.practice.notes.placeholder')}
                 {...register("dailyNotes")}
                 rows={4}
+                disabled={!isCurrentDateLoggable}
               />
             </div>
           </CardContent>
           <CardFooter>
-            <Button type="submit" className="w-full" disabled={isSubmitting || fields.length === 0}>
+            <Button type="submit" className="w-full" disabled={isSubmitting || fields.length === 0 || !isCurrentDateLoggable}>
               {isSubmitting ? (
                  <>
                   <Loader2 className="mr-2 h-4 w-4 animate-spin" />

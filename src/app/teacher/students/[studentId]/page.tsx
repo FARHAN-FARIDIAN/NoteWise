@@ -38,8 +38,8 @@ import { useTranslations } from '@/hooks/useTranslations';
 import { useLanguage } from '@/contexts/LanguageContext';
 
 
-export default function ManageStudentPage({ params: paramsProp }: { params: { studentId: string } }) {
-  const resolvedParams = use(paramsProp as any); 
+export default function ManageStudentPage({ params }: { params: { studentId: string } }) {
+  const resolvedParams = use(params as any); // Use 'use' hook for params
   const studentId = resolvedParams.studentId; 
   const { t } = useTranslations();
   const { toast } = useToast();
@@ -53,7 +53,9 @@ export default function ManageStudentPage({ params: paramsProp }: { params: { st
   const [selectedTemplateId, setSelectedTemplateId] = useState<string | undefined>(undefined);
   const [weekStartDate, setWeekStartDate] = useState<Date | undefined>(() => {
     const today = new Date();
-    return startOfWeek(today, { weekStartsOn: 1 }); // Monday as start of week
+    // Ensure week starts on Monday for consistency if using date-fns startOfWeek elsewhere
+    // For just default, new Date() is fine, calendar handles visual start of week.
+    return today; 
   });
   const [isAssigning, setIsAssigning] = useState(false);
   const [selectedLogForDetails, setSelectedLogForDetails] = useState<DailyPracticeLog | null>(null);
@@ -120,6 +122,7 @@ export default function ManageStudentPage({ params: paramsProp }: { params: { st
             ...student,
             currentRoutine: templateDetails.templateName,
             currentRoutineId: templateDetails.id,
+            currentRoutineAssignmentDate: weekStartDate.toISOString(), // Save assignment date
             routinesAssigned: (student.routinesAssigned || 0) + 1,
           };
         }
@@ -225,6 +228,11 @@ export default function ManageStudentPage({ params: paramsProp }: { params: { st
                 </p>
                 <p className="text-sm text-muted-foreground">{t('teacher.students.managePage.header.currentRoutine', { routineName: displayStudent.currentRoutine || t('teacher.students.managePage.header.noRoutineAssigned') })}</p>
                 <p className="text-sm text-muted-foreground">{t('teacher.students.managePage.header.routinesAssigned', { count: displayStudent.routinesAssigned || 0 })}</p>
+                 {displayStudent.currentRoutineAssignmentDate && isValid(parseISO(displayStudent.currentRoutineAssignmentDate)) && (
+                    <p className="text-sm text-muted-foreground italic">
+                        {t('teacher.students.managePage.header.currentRoutineAssignedOn', { date: format(parseISO(displayStudent.currentRoutineAssignmentDate), "PPP", { locale: language === 'fa' ? faIR : undefined }) })}
+                    </p>
+                )}
             </div>
         </CardHeader>
       </Card>
@@ -388,4 +396,3 @@ export default function ManageStudentPage({ params: paramsProp }: { params: { st
     </div>
   );
 }
-

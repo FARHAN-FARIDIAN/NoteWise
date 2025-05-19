@@ -42,7 +42,7 @@ export function AppShell({ children, role }: AppShellProps) {
       <SidebarProvider defaultOpen>
         <div className="flex min-h-screen flex-col w-full">
           <Header />
-          <div className="flex flex-1 w-full"> {/* Ensure this parent takes full width */}
+          <div className="flex flex-1 w-full">
             <Sidebar collapsible="icon" className="border-r" side={dir === 'rtl' ? 'right' : 'left'}>
               <SidebarContent className="p-2">
                 <SidebarMenu>
@@ -67,7 +67,7 @@ export function AppShell({ children, role }: AppShellProps) {
                  <SidebarMenu>
                     <SidebarMenuItem>
                         <SidebarMenuButton asChild tooltip={t('appShell.sidebar.settings')}>
-                            <button onClick={() => alert("Settings clicked (placeholder)")}><Settings /><span>{t('appShell.sidebar.settings')}</span></button>
+                            <Link href="/teacher/settings"><Settings /><span>{t('appShell.sidebar.settings')}</span></Link>
                         </SidebarMenuButton>
                     </SidebarMenuItem>
                     <SidebarMenuItem>

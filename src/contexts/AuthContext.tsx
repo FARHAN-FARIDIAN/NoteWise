@@ -1,7 +1,7 @@
 
 "use client";
 
-import type { User as FirebaseUser } from 'firebase/auth'; // Placeholder
+import type { User as FirebaseUser } from 'firebase/auth'; 
 import type { ReactNode} from 'react';
 import { createContext, useState, useEffect, useContext } from 'react';
 import type { User, StudentData } from '@/types'; 
@@ -11,16 +11,18 @@ import { LOCAL_STORAGE_STUDENTS_KEY } from '@/lib/localStorageKeys';
 
 interface AuthContextType {
   user: FirebaseUser | null; 
-  userData: User | StudentData | null; // Can be teacher or student data
+  userData: User | StudentData | null;
   loading: boolean;
   login: (email: string, pass: string) => Promise<void>;
-  signup: (email: string, pass: string, name: string) => Promise<void>; // Teacher signup
+  signup: (email: string, pass: string, name: string) => Promise<void>; 
   logout: () => Promise<void>;
+  updateDisplayName: (newDisplayName: string) => Promise<void>;
+  updateUserPassword: (newPassword: string) => Promise<void>; // For teacher
+  updateStudentPassword: (currentPassword: string, newPassword: string) => Promise<void>; // For student
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
-// Mock Firebase User structure
 interface MockFirebaseUser {
   uid: string;
   email: string | null;
@@ -81,10 +83,9 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
 
     const preparedLoginEmail = email.trim().toLowerCase();
 
-    // 1. Attempt Student Login
-    const storedStudents = getFromLocalStorage<StudentData[]>(LOCAL_STORAGE_STUDENTS_KEY, []);
-    // Ensure all student emails from storage are normalized before comparison
-    const normalizedStoredStudents = storedStudents.map(s => ({
+    const allStoredStudents = getFromLocalStorage<StudentData[]>(LOCAL_STORAGE_STUDENTS_KEY, []);
+    // Normalize all student emails from storage before comparison
+    const normalizedStoredStudents = allStoredStudents.map(s => ({
       ...s,
       email: s.email ? s.email.trim().toLowerCase() : "" 
     }));
@@ -93,29 +94,28 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       (s) => s.email === preparedLoginEmail
     );
 
-    if (studentAccount && pass === "password") {
-      // If studentAccount is found and password matches, proceed.
-      // The StudentData type already enforces role: 'student'.
+    if (studentAccount && studentAccount.password === pass) {
       const firebaseUser: MockFirebaseUser = {
-        uid: studentAccount.uid || studentAccount.id, // Use uid if available, fallback to id
-        email: studentAccount.email, // This is the matched, normalized email
+        uid: studentAccount.uid || studentAccount.id,
+        email: studentAccount.email,
         displayName: studentAccount.displayName 
       };
       setUser(firebaseUser);
 
-      // Explicitly reconstruct the StudentData object for the session to ensure all fields are correct
       const studentSessionData: StudentData = {
         id: studentAccount.id,
         uid: studentAccount.uid || studentAccount.id,
         displayName: studentAccount.displayName,
-        email: studentAccount.email!, // email is guaranteed by the find condition
+        email: studentAccount.email!,
+        password: studentAccount.password, // Storing it here is fine for mock, but not for prod
         avatar: studentAccount.avatar,
         routinesAssigned: studentAccount.routinesAssigned,
         status: studentAccount.status,
-        role: 'student', // Explicitly set role
+        role: 'student', // Ensure role is student
         teacherId: studentAccount.teacherId,
         currentRoutine: studentAccount.currentRoutine,
         currentRoutineId: studentAccount.currentRoutineId,
+        currentRoutineAssignmentDate: studentAccount.currentRoutineAssignmentDate, // Ensure this is copied
         joinedDate: studentAccount.joinedDate,
       };
       setUserData(studentSessionData); 
@@ -124,7 +124,6 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       return;
     }
 
-    // 2. Attempt Signed-up Teacher Login (from current session)
     const persistedTeacherCredsRaw = sessionStorage.getItem(SESSION_STORAGE_TEACHER_CREDS_KEY);
     if (persistedTeacherCredsRaw) {
       try {
@@ -144,17 +143,15 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
 
           setUser(signedUpTeacherFirebaseUser);
           setUserData(signedUpTeacherAppUser);
-          persistAuth(signedUpTeacherFirebaseUser, signedUpTeacherAppUser); // Persist this full user data
+          persistAuth(signedUpTeacherFirebaseUser, signedUpTeacherAppUser);
           setLoading(false);
           return;
         }
       } catch (e) {
         console.error("Error parsing teacher credentials from session storage", e);
-         sessionStorage.removeItem(SESSION_STORAGE_TEACHER_CREDS_KEY);
       }
     }
     
-    // 3. Fallback/Default Demo Teacher Login
     if (preparedLoginEmail === 'teacher@example.com' && pass === "teacherpass") {
         const teacherFirebaseUser: MockFirebaseUser = { uid: 'default-teacher-uid', email: preparedLoginEmail, displayName: 'Demo Teacher' };
         const teacherAppUser: User = { uid: teacherFirebaseUser.uid, email: preparedLoginEmail, displayName: 'Demo Teacher', role: 'teacher' };
@@ -162,10 +159,11 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         setUserData(teacherAppUser);
         persistAuth(teacherFirebaseUser, teacherAppUser);
         
+        // Store demo teacher's "credentials" too so it behaves consistently if they "change" display name
         const demoTeacherCredsForSession: StoredTeacherCredentials = {
           uid: teacherFirebaseUser.uid,
           email: teacherFirebaseUser.email!, 
-          password: pass, 
+          password: pass, // Use the actual password for consistency
           displayName: teacherAppUser.displayName!
         };
         sessionStorage.setItem(SESSION_STORAGE_TEACHER_CREDS_KEY, JSON.stringify(demoTeacherCredsForSession));
@@ -194,7 +192,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       uid: newTeacherUID,
       email: processedEmail, 
       password: pass, 
-      displayName: newTeacherFirebaseUser.displayName!
+      displayName: name
     };
     sessionStorage.setItem(SESSION_STORAGE_TEACHER_CREDS_KEY, JSON.stringify(teacherCredentialsToStore));
     
@@ -208,12 +206,101 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     setUserData(null);
     sessionStorage.removeItem(SESSION_STORAGE_USER_KEY);
     sessionStorage.removeItem(SESSION_STORAGE_USER_DATA_KEY);
-    // SESSION_STORAGE_TEACHER_CREDS_KEY is NOT cleared here, 
-    // allowing a teacher who signed up in this session to log back in.
+    // Do NOT remove SESSION_STORAGE_TEACHER_CREDS_KEY on logout
+    // to allow re-login for a teacher signed up in the same session.
     setLoading(false);
   };
 
-  const value = { user, userData, loading, login, signup, logout };
+  const updateDisplayName = async (newDisplayName: string) => {
+    if (!user || !userData) {
+      throw new Error("User not authenticated.");
+    }
+    setLoading(true);
+    await new Promise(resolve => setTimeout(resolve, 500)); 
+
+    const updatedFirebaseUser = { ...user, displayName: newDisplayName };
+    const updatedUserData = { ...userData, displayName: newDisplayName };
+
+    setUser(updatedFirebaseUser);
+    setUserData(updatedUserData as User | StudentData); // Cast to ensure type safety
+    persistAuth(updatedFirebaseUser, updatedUserData as User | StudentData);
+
+    if (userData.role === 'teacher') {
+        const persistedTeacherCredsRaw = sessionStorage.getItem(SESSION_STORAGE_TEACHER_CREDS_KEY);
+        if (persistedTeacherCredsRaw) {
+            try {
+                const teacherCreds = JSON.parse(persistedTeacherCredsRaw) as StoredTeacherCredentials;
+                if (teacherCreds.uid === userData.uid) {
+                    const updatedTeacherCreds = { ...teacherCreds, displayName: newDisplayName };
+                    sessionStorage.setItem(SESSION_STORAGE_TEACHER_CREDS_KEY, JSON.stringify(updatedTeacherCreds));
+                }
+            } catch (e) { console.error("Error updating teacher creds display name", e); }
+        }
+    } else if (userData.role === 'student') {
+        let students = getFromLocalStorage<StudentData[]>(LOCAL_STORAGE_STUDENTS_KEY, []);
+        students = students.map(s => s.id === (userData as StudentData).id ? { ...s, displayName: newDisplayName } : s);
+        saveToLocalStorage(LOCAL_STORAGE_STUDENTS_KEY, students);
+    }
+    setLoading(false);
+  };
+
+  const updateUserPassword = async (newPassword: string) => { // For Teacher
+    if (!user || !userData || userData.role !== 'teacher') {
+      throw new Error("User not authenticated or not a teacher.");
+    }
+     if (userData.email === 'teacher@example.com') { 
+        throw new Error("Demo teacher password cannot be changed via this interface.");
+    }
+
+    setLoading(true);
+    await new Promise(resolve => setTimeout(resolve, 500));
+
+    const persistedTeacherCredsRaw = sessionStorage.getItem(SESSION_STORAGE_TEACHER_CREDS_KEY);
+    if (persistedTeacherCredsRaw) {
+        try {
+            const teacherCreds = JSON.parse(persistedTeacherCredsRaw) as StoredTeacherCredentials;
+            if (teacherCreds.uid === userData.uid) { // Match UID
+                const updatedTeacherCreds = { ...teacherCreds, password: newPassword };
+                sessionStorage.setItem(SESSION_STORAGE_TEACHER_CREDS_KEY, JSON.stringify(updatedTeacherCreds));
+                setLoading(false);
+                return;
+            }
+        } catch (e) { console.error("Error updating teacher creds password", e); }
+    }
+    setLoading(false);
+    // This error might occur if trying to change password for a teacher not signed up in this session
+    throw new Error("Could not update password. User credentials not found for this session, or mismatch.");
+  };
+
+  const updateStudentPassword = async (currentPassword: string, newPassword: string) => {
+    if (!user || !userData || userData.role !== 'student') {
+      throw new Error("User not authenticated or not a student.");
+    }
+    setLoading(true);
+    await new Promise(resolve => setTimeout(resolve, 500));
+
+    let students = getFromLocalStorage<StudentData[]>(LOCAL_STORAGE_STUDENTS_KEY, []);
+    const studentIndex = students.findIndex(s => s.id === (userData as StudentData).id);
+
+    if (studentIndex === -1) {
+      setLoading(false);
+      throw new Error("Student record not found in storage.");
+    }
+
+    const studentToUpdate = students[studentIndex];
+    if (studentToUpdate.password !== currentPassword) {
+      setLoading(false);
+      throw new Error("Current password incorrect.");
+    }
+
+    students[studentIndex] = { ...studentToUpdate, password: newPassword };
+    saveToLocalStorage(LOCAL_STORAGE_STUDENTS_KEY, students);
+    
+    setLoading(false);
+  };
+
+
+  const value = { user, userData, loading, login, signup, logout, updateDisplayName, updateUserPassword, updateStudentPassword };
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 };
@@ -225,4 +312,3 @@ export const useAuth = () => {
   }
   return context;
 };
-

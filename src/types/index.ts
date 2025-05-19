@@ -14,29 +14,30 @@ export interface StudentData {
   uid?: string; 
   displayName: string;
   email: string;
+  password?: string;
   avatar: string;
   routinesAssigned: number;
   status: 'Active' | 'Inactive';
   role: 'student';
-  teacherId?: string; // Added to link student to a teacher
-  currentRoutine?: string; // Name of the currently assigned routine
-  currentRoutineId?: string; // ID of the assigned routine template
-  joinedDate?: string; // ISO date string
+  teacherId?: string; 
+  currentRoutine?: string; 
+  currentRoutineId?: string; 
+  currentRoutineAssignmentDate?: string; // Date routine was assigned
+  joinedDate?: string; 
 }
 
 
 export interface PracticeSection {
-  id: string; // Unique ID for the section within the template
+  id: string; 
   name: string;
   description?: string;
 }
 
 export interface RoutineTemplate {
-  id: string; // Unique ID for the template
-  // teacherId: string; // Could be added if supporting multiple teachers
+  id: string; 
   templateName: string;
   sections: PracticeSection[];
-  lastModified: string; // ISO date string
+  lastModified: string; 
 }
 
 export interface PracticeAssignment {
@@ -44,7 +45,7 @@ export interface PracticeAssignment {
   teacherId: string;
   studentId: string;
   routineTemplateId: string;
-  weekStartDate: string; // ISO date string
+  weekStartDate: string; 
   isActive: boolean;
 }
 
@@ -55,11 +56,11 @@ export interface DailyPracticeLogEntry {
 }
 
 export interface DailyPracticeLog {
-  id: string; // Unique ID for the log entry
+  id: string; 
   studentId: string;
   routineName?: string; 
   routineTemplateId?: string;
-  date: string; // Store as ISO date string (YYYY-MM-DD) for easier keying/filtering
+  date: string; 
   logData: DailyPracticeLogEntry[];
   dailyNotes?: string;
 }

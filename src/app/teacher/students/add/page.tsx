@@ -29,16 +29,13 @@ export default function AddNewStudentPage() {
   const addStudentSchema = z.object({
     fullName: z.string().min(2, { message: t('teacher.students.addPage.validation.fullNameMin') }),
     email: z.string().trim().toLowerCase().email({ message: t('teacher.students.addPage.validation.emailInvalid') }),
-    initialPassword: z.string().min(6, { message: t('teacher.students.addPage.validation.passwordMin') }).default("password"),
+    initialPassword: z.string().min(6, { message: t('teacher.students.addPage.validation.passwordMin') }),
   });
 
   type AddStudentFormInputs = z.infer<typeof addStudentSchema>;
 
   const { register, handleSubmit, reset, formState: { errors } } = useForm<AddStudentFormInputs>({
     resolver: zodResolver(addStudentSchema),
-    defaultValues: {
-      initialPassword: "password",
-    }
   });
 
   const onSubmit: SubmitHandler<AddStudentFormInputs> = async (data) => {
@@ -51,6 +48,7 @@ export default function AddNewStudentPage() {
       uid: newStudentId, 
       displayName: data.fullName,
       email: data.email,
+      password: data.initialPassword, // Save the actual password
       avatar: `https://placehold.co/40x40.png?text=${initials}`,
       routinesAssigned: 0,
       status: 'Active',
@@ -144,6 +142,7 @@ export default function AddNewStudentPage() {
               <Input
                 id="initialPassword"
                 type="password"
+                placeholder={t('teacher.students.addPage.form.password.placeholder')}
                 {...register("initialPassword")}
                 aria-invalid={errors.initialPassword ? "true" : "false"}
                 className={errors.initialPassword ? "border-destructive" : ""}
@@ -171,4 +170,3 @@ export default function AddNewStudentPage() {
     </div>
   );
 }
-

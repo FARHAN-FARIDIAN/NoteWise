@@ -16,17 +16,48 @@ import {
   DropdownMenuRadioItem,
 } from '@/components/ui/dropdown-menu';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
-import { LogOut, UserCircle, LayoutDashboard, Music, Users, Settings, Languages, Check } from 'lucide-react';
+import { LogOut, UserCircle, LayoutDashboard, Music, Users, Settings, Languages, Sun, Moon } from 'lucide-react';
 import { useAuth } from '@/hooks/useAuth';
 import { Skeleton } from '@/components/ui/skeleton';
 import { useLanguage } from '@/contexts/LanguageContext';
 import { useTranslations } from '@/hooks/useTranslations';
+import { useEffect, useState } from 'react';
+import { LOCAL_STORAGE_THEME_KEY } from '@/lib/localStorageKeys';
+
+type Theme = "light" | "dark";
 
 export function Header() {
   const { user, userData, logout, loading } = useAuth();
   const router = useRouter();
   const { language, setLanguage, dir } = useLanguage();
   const { t } = useTranslations();
+  const [currentTheme, setCurrentTheme] = useState<Theme>("light");
+
+  useEffect(() => {
+    const storedTheme = localStorage.getItem(LOCAL_STORAGE_THEME_KEY);
+    const root = window.document.documentElement;
+    const systemPrefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+
+    if (storedTheme === 'dark' || (!storedTheme && storedTheme !== 'light' && systemPrefersDark)) {
+      setCurrentTheme('dark');
+      root.classList.add('dark');
+    } else {
+      setCurrentTheme('light');
+      root.classList.remove('dark');
+    }
+  }, []);
+
+
+  const toggleTheme = () => {
+    const newTheme = currentTheme === "light" ? "dark" : "light";
+    setCurrentTheme(newTheme);
+    localStorage.setItem(LOCAL_STORAGE_THEME_KEY, newTheme);
+    const root = window.document.documentElement;
+    root.classList.remove(currentTheme === "light" ? "light" : "dark");
+    root.classList.add(newTheme);
+    // Dispatch storage event so RootLayout and Settings page can also react if needed
+    window.dispatchEvent(new StorageEvent('storage', { key: LOCAL_STORAGE_THEME_KEY, newValue: newTheme }));
+  };
 
   const handleLogout = async () => {
     await logout();
@@ -38,11 +69,13 @@ export function Header() {
     return name.split(' ').map(n => n[0]).join('').toUpperCase();
   };
 
+  const settingsPath = userData?.role === 'teacher' ? '/teacher/settings' : '/student/settings';
+
   return (
     <header className="sticky top-0 z-50 w-full border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
       <div className="w-full flex h-16 items-center justify-between px-4 sm:px-6 lg:px-8">
         <Logo />
-        <nav className="flex items-center gap-2 md:gap-4">
+        <nav className="flex items-center gap-1 md:gap-2">
           {loading ? (
             <Skeleton className="h-10 w-10 rounded-full" />
           ) : user && userData ? (
@@ -65,6 +98,15 @@ export function Header() {
                   <Link href="/student/practice">{t('header.myPractice')}</Link>
                 </Button>
               )}
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={toggleTheme}
+                aria-label={t('header.toggleTheme')}
+                className="h-10 w-10"
+              >
+                {currentTheme === 'light' ? <Moon className="h-5 w-5" /> : <Sun className="h-5 w-5" />}
+              </Button>
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
                   <Button variant="ghost" className="h-10 w-10 px-0">
@@ -109,7 +151,7 @@ export function Header() {
                       <span>{t('header.dashboard')}</span>
                     </DropdownMenuItem>
                   )}
-                   {userData.role === 'teacher' && ( // Teacher specific mobile/small screen links
+                   {userData.role === 'teacher' && ( 
                     <>
                       <DropdownMenuItem onClick={() => router.push('/teacher/students')} className="md:hidden">
                         <Users className="mr-2 h-4 w-4" />
@@ -127,7 +169,7 @@ export function Header() {
                       <span>{t('header.myPractice')}</span>
                     </DropdownMenuItem>
                   )}
-                  <DropdownMenuItem disabled>
+                  <DropdownMenuItem onClick={() => router.push(settingsPath)}>
                     <Settings className="mr-2 h-4 w-4" />
                     <span>{t('header.settings')}</span>
                   </DropdownMenuItem>
@@ -141,6 +183,15 @@ export function Header() {
             </>
           ) : (
              <>
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={toggleTheme}
+                aria-label={t('header.toggleTheme')}
+                className="h-10 w-10"
+              >
+                {currentTheme === 'light' ? <Moon className="h-5 w-5" /> : <Sun className="h-5 w-5" />}
+              </Button>
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
                   <Button variant="ghost" className="h-10 w-10 px-0">
@@ -174,3 +225,4 @@ export function Header() {
     </header>
   );
 }
+
