@@ -11,7 +11,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle, CardFooter } from '@/components/ui/card';
 import { useToast } from '@/hooks/use-toast';
 import Link from 'next/link';
-import { ArrowLeft, PlusCircle, Trash2, Edit3, Save, Loader2, AlertTriangle } from 'lucide-react';
+import { ArrowLeft, PlusCircle, Trash2, Edit3, Save, Loader2, AlertTriangle, Info } from 'lucide-react';
 import { useState, useEffect, use } from 'react';
 import type { RoutineTemplate, PracticeSection } from '@/types';
 import { generateId, getFromLocalStorage, saveToLocalStorage } from '@/lib/utils';
@@ -35,6 +35,7 @@ export default function EditRoutineTemplatePage({ params: paramsProp }: { params
     id: z.string().default(() => generateId()),
     name: z.string().min(1, { message: t('teacher.routines.validation.sectionNameRequired') }),
     description: z.string().optional(),
+    idealDailyTimeMinutes: z.coerce.number().min(0, {message: t('teacher.routines.validation.idealTimeMin')}).optional(),
   });
   
   const routineTemplateSchema = z.object({
@@ -44,11 +45,11 @@ export default function EditRoutineTemplatePage({ params: paramsProp }: { params
   
   type RoutineTemplateFormInputs = z.infer<typeof routineTemplateSchema>;
 
-  const { control, register, handleSubmit, reset, formState: { errors } } = useForm<RoutineTemplateFormInputs>({
+  const { control, register, handleSubmit, reset, watch, formState: { errors } } = useForm<RoutineTemplateFormInputs>({
     resolver: zodResolver(routineTemplateSchema),
     defaultValues: {
       templateName: '',
-      sections: [{ id: generateId(), name: '', description: '' }],
+      sections: [{ id: generateId(), name: '', description: '', idealDailyTimeMinutes: 0 }],
     },
   });
 
@@ -59,7 +60,13 @@ export default function EditRoutineTemplatePage({ params: paramsProp }: { params
       const templateToEdit = storedTemplates.find(t => t.id === templateId);
       
       if (templateToEdit) {
-        reset(templateToEdit);
+        reset({
+            templateName: templateToEdit.templateName,
+            sections: templateToEdit.sections.map(s => ({
+                ...s,
+                idealDailyTimeMinutes: s.idealDailyTimeMinutes || 0, // Ensure default
+            }))
+        });
       } else {
         setTemplateNotFound(true);
         toast({ title: t('teacher.routines.createPage.toast.error.title'), description: t('teacher.routines.editPage.notFound.toast'), variant: "destructive" });
@@ -74,14 +81,28 @@ export default function EditRoutineTemplatePage({ params: paramsProp }: { params
     name: "sections",
   });
 
+  const watchedSections = watch("sections");
+  const totalIdealDailyTime = watchedSections.reduce((sum, section) => sum + (section.idealDailyTimeMinutes || 0), 0);
+  const idealWeeklyTime = totalIdealDailyTime * 8;
+
+
   const onSubmit: SubmitHandler<RoutineTemplateFormInputs> = async (data) => {
     setIsSubmitting(true);
     
+    const totalIdealDaily = data.sections.reduce((sum, s) => sum + (s.idealDailyTimeMinutes || 0), 0);
+    const calculatedIdealWeekly = totalIdealDaily * 8;
+
     const updatedTemplate: RoutineTemplate = {
       id: templateId,
       templateName: data.templateName,
-      sections: data.sections.map(s => ({ ...s, id: s.id || generateId() })),
+      sections: data.sections.map(s => ({ 
+        id: s.id || generateId(),
+        name: s.name,
+        description: s.description,
+        idealDailyTimeMinutes: s.idealDailyTimeMinutes || 0,
+      })),
       lastModified: new Date().toISOString(),
+      calculatedIdealWeeklyTime: calculatedIdealWeekly,
     };
 
     try {
@@ -211,17 +232,38 @@ export default function EditRoutineTemplatePage({ params: paramsProp }: { params
                         {...register(`sections.${index}.description` as const)}
                       />
                     </div>
+                     <div>
+                      <Label htmlFor={`sections.${index}.idealDailyTimeMinutes`}>{t('teacher.routines.form.sections.idealDailyTime.label')}</Label>
+                      <Input
+                        id={`sections.${index}.idealDailyTimeMinutes`}
+                        type="number"
+                        min="0"
+                        placeholder={t('teacher.routines.form.sections.idealDailyTime.placeholder')}
+                        {...register(`sections.${index}.idealDailyTimeMinutes` as const)}
+                         aria-invalid={errors.sections?.[index]?.idealDailyTimeMinutes ? "true" : "false"}
+                        className={`w-32 ${errors.sections?.[index]?.idealDailyTimeMinutes ? "border-destructive" : ""}`}
+                      />
+                      {errors.sections?.[index]?.idealDailyTimeMinutes && <p className="text-sm text-destructive">{errors.sections[index]?.idealDailyTimeMinutes?.message}</p>}
+                    </div>
                   </div>
                 </Card>
               ))}
               <Button
                 type="button"
                 variant="outline"
-                onClick={() => append({ id: generateId(), name: '', description: '' })}
+                onClick={() => append({ id: generateId(), name: '', description: '', idealDailyTimeMinutes: 0 })}
                 className="mt-2 w-full"
               >
                 <PlusCircle className="mr-2 h-4 w-4" /> {t('teacher.routines.form.addSectionButton')}
               </Button>
+            </div>
+             <div className="mt-4 p-3 border rounded-md bg-blue-50 dark:bg-blue-900/30">
+                <div className="flex items-center text-sm text-blue-700 dark:text-blue-300">
+                    <Info className="mr-2 h-5 w-5"/>
+                    <p>
+                        {t('teacher.routines.form.idealWeeklyTimeInfo', {time: idealWeeklyTime || 0})}
+                    </p>
+                </div>
             </div>
           </CardContent>
           <CardFooter>

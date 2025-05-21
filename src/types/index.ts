@@ -1,3 +1,4 @@
+
 export interface User {
   uid: string;
   email: string | null;
@@ -23,6 +24,8 @@ export interface StudentData {
   currentRoutine?: string; 
   currentRoutineId?: string; 
   currentRoutineAssignmentDate?: string; // Date routine was assigned
+  currentRoutineIdealWeeklyTime?: number; // Ideal weekly time for the current routine
+  currentRoutineProgressPercent?: number; // Progress for the current routine
   joinedDate?: string; 
 }
 
@@ -31,6 +34,7 @@ export interface PracticeSection {
   id: string; 
   name: string;
   description?: string;
+  idealDailyTimeMinutes?: number;
 }
 
 export interface RoutineTemplate {
@@ -38,6 +42,7 @@ export interface RoutineTemplate {
   templateName: string;
   sections: PracticeSection[];
   lastModified: string; 
+  calculatedIdealWeeklyTime?: number;
 }
 
 export interface PracticeAssignment {
@@ -64,3 +69,4 @@ export interface DailyPracticeLog {
   logData: DailyPracticeLogEntry[];
   dailyNotes?: string;
 }
+

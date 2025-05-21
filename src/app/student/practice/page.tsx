@@ -9,19 +9,51 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle, CardFooter } from '@/components/ui/card';
+import { Progress } from '@/components/ui/progress';
 import { useToast } from '@/hooks/use-toast';
-import { CalendarIcon, ChevronLeft, ChevronRight, Save, BookOpen, Clock, Loader2, AlertCircle, Ban } from 'lucide-react';
+import { CalendarIcon, ChevronLeft, ChevronRight, Save, BookOpen, Clock, Loader2, AlertCircle, Ban, ListChecks, Info, BarChart3, Eye } from 'lucide-react';
 import { format, isValid, parseISO, addDays, startOfDay, endOfDay, isWithinInterval, isBefore, isAfter } from 'date-fns';
 import { faIR } from 'date-fns/locale/fa-IR';
 import { useState, useEffect } from 'react';
 import type { DailyPracticeLog, RoutineTemplate, StudentData, PracticeSection } from '@/types';
 import { useAuth } from '@/hooks/useAuth';
 import { getFromLocalStorage, saveToLocalStorage, generateId } from '@/lib/utils';
-import { LOCAL_STORAGE_ROUTINES_KEY, LOCAL_STORAGE_PRACTICE_LOGS_KEY } from '@/lib/localStorageKeys';
+import { LOCAL_STORAGE_ROUTINES_KEY, LOCAL_STORAGE_PRACTICE_LOGS_KEY, LOCAL_STORAGE_STUDENTS_KEY } from '@/lib/localStorageKeys';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { useTranslations } from '@/hooks/useTranslations';
 import { useLanguage } from '@/contexts/LanguageContext';
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+  DialogFooter,
+  DialogClose,
+} from "@/components/ui/dialog";
+import {
+  ChartContainer,
+  ChartTooltip,
+  ChartTooltipContent,
+  ChartLegend,
+  ChartLegendContent,
+  type ChartConfig
+} from "@/components/ui/chart";
+import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from "recharts";
 
+interface DailyChartData {
+  date: string;
+  actualPractice: number;
+  idealDailyPractice: number;
+}
 
 const practiceLogEntrySchema = z.object({
   sectionId: z.string(),
@@ -40,7 +72,7 @@ type DailyPracticeLogInputs = z.infer<typeof dailyPracticeLogSchema>;
 
 export default function DailyPracticeLogPage() {
   const { toast } = useToast();
-  const { userData } = useAuth();
+  const { userData } = useAuth(); 
   const student = userData as StudentData | null;
   const { t } = useTranslations();
   const { language } = useLanguage();
@@ -49,10 +81,30 @@ export default function DailyPracticeLogPage() {
   const [isLoading, setIsLoading] = useState(true);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [assignedRoutineDetails, setAssignedRoutineDetails] = useState<RoutineTemplate | null>(null);
+  const [displayProgressPercent, setDisplayProgressPercent] = useState<number>(0);
 
   const [minLogDate, setMinLogDate] = useState<Date | null>(null);
   const [maxLogDate, setMaxLogDate] = useState<Date | null>(null);
   const [isCurrentDateLoggable, setIsCurrentDateLoggable] = useState(true);
+  
+  const [studentPracticeLogs, setStudentPracticeLogs] = useState<DailyPracticeLog[]>([]); // For table and chart
+  const [selectedLogForDetails, setSelectedLogForDetails] = useState<DailyPracticeLog | null>(null);
+  const [isLogDetailsDialogOpen, setIsLogDetailsDialogOpen] = useState(false);
+
+  const [chartData, setChartData] = useState<DailyChartData[]>([]);
+  const [totalIdealDailyTimeForAssignedRoutine, setTotalIdealDailyTimeForAssignedRoutine] = useState<number>(0);
+  const [logSubmissionCounter, setLogSubmissionCounter] = useState(0);
+
+  const chartConfig = {
+    actualPractice: {
+      label: t('teacher.students.managePage.chart.actualPracticeLabel'), 
+      color: "hsl(var(--chart-1))",
+    },
+    idealDailyPractice: {
+      label: t('teacher.students.managePage.chart.idealPracticeLabel'), 
+      color: "hsl(var(--chart-2))",
+    },
+  } satisfies ChartConfig;
 
 
   const { control, register, handleSubmit, reset, setValue, formState: { errors } } = useForm<DailyPracticeLogInputs>({
@@ -73,13 +125,23 @@ export default function DailyPracticeLogPage() {
     setIsLoading(true);
     if (!student || !student.currentRoutineId) {
       setAssignedRoutineDetails(null);
-      setIsCurrentDateLoggable(false); // No routine, so not loggable
+      setIsCurrentDateLoggable(false); 
       setMinLogDate(null);
       setMaxLogDate(null);
-      replace([]); // Clear fields if no routine
+      replace([]); 
       setValue("dailyNotes", '');
+      setDisplayProgressPercent(0);
       setIsLoading(false);
       return;
+    }
+
+    const allStoredStudents = getFromLocalStorage<StudentData[]>(LOCAL_STORAGE_STUDENTS_KEY, []);
+    const latestStudentData = allStoredStudents.find(s => s.id === student.id);
+    
+    if (latestStudentData) {
+        setDisplayProgressPercent(latestStudentData.currentRoutineProgressPercent || 0);
+    } else {
+        setDisplayProgressPercent(student.currentRoutineProgressPercent || 0); 
     }
 
     const allTemplates = getFromLocalStorage<RoutineTemplate[]>(LOCAL_STORAGE_ROUTINES_KEY, []);
@@ -93,14 +155,12 @@ export default function DailyPracticeLogPage() {
     if (student.currentRoutineAssignmentDate && isValid(parseISO(student.currentRoutineAssignmentDate))) {
       const assignmentStart = startOfDay(parseISO(student.currentRoutineAssignmentDate));
       currentMinLogDate = assignmentStart;
-      currentMaxLogDate = endOfDay(addDays(assignmentStart, 7)); // 8-day window (day 0 to day 7)
+      currentMaxLogDate = endOfDay(addDays(assignmentStart, 7)); 
       
       if (isValid(currentDate) && isValid(currentMinLogDate) && isValid(currentMaxLogDate)) {
         loggableForCurrentDate = isWithinInterval(startOfDay(currentDate), { start: currentMinLogDate, end: currentMaxLogDate });
       }
     } else {
-      // If no assignment date, perhaps default to unloggable or some other rule.
-      // For now, if date is missing, consider it not loggable according to this new rule.
       loggableForCurrentDate = false;
     }
     
@@ -110,7 +170,11 @@ export default function DailyPracticeLogPage() {
 
     const allLogs = getFromLocalStorage<DailyPracticeLog[]>(LOCAL_STORAGE_PRACTICE_LOGS_KEY, []);
     const dateString = format(currentDate, "yyyy-MM-dd");
-    const existingLog = allLogs.find(log => log.studentId === student?.id && log.date === dateString);
+    const existingLog = allLogs.find(log => 
+        log.studentId === student?.id && 
+        log.date === dateString && 
+        log.routineTemplateId === student.currentRoutineId
+    );
 
     let initialLogData: DailyPracticeLogInputs['logData'] = [];
     if (existingLog) {
@@ -124,7 +188,6 @@ export default function DailyPracticeLogPage() {
       }));
       setValue("dailyNotes", '');
     } else {
-      // No routine details, clear fields
        replace([]);
        setValue("dailyNotes", '');
     }
@@ -133,7 +196,127 @@ export default function DailyPracticeLogPage() {
     setValue("date", currentDate);
     setIsLoading(false);
 
-  }, [currentDate, student, reset, setValue, replace]);
+  }, [currentDate, student, replace, setValue, language, t]);
+
+  useEffect(() => {
+    if (assignedRoutineDetails && assignedRoutineDetails.sections) {
+        const totalIdeal = assignedRoutineDetails.sections.reduce((sum, section) => sum + (section.idealDailyTimeMinutes || 0), 0);
+        setTotalIdealDailyTimeForAssignedRoutine(totalIdeal);
+    } else {
+        setTotalIdealDailyTimeForAssignedRoutine(0);
+    }
+  }, [assignedRoutineDetails]);
+
+  useEffect(() => {
+    if (student?.id && student?.currentRoutineId && student?.currentRoutineAssignmentDate && isValid(parseISO(student.currentRoutineAssignmentDate))) {
+        const allLogs = getFromLocalStorage<DailyPracticeLog[]>(LOCAL_STORAGE_PRACTICE_LOGS_KEY, []);
+        
+        const assignmentStartForFiltering = startOfDay(parseISO(student.currentRoutineAssignmentDate));
+        const assignmentEndForFiltering = endOfDay(addDays(assignmentStartForFiltering, 7));
+
+        const relevantLogs = allLogs.filter(log =>
+            log.studentId === student.id &&
+            log.routineTemplateId === student.currentRoutineId &&
+            isValid(parseISO(log.date)) &&
+            isWithinInterval(parseISO(log.date), { start: assignmentStartForFiltering, end: assignmentEndForFiltering })
+        ).sort((a,b) => {
+            const dateA = parseISO(a.date); 
+            const dateB = parseISO(b.date);
+            if (!isValid(dateA) && !isValid(dateB)) return 0;
+            if (!isValid(dateA)) return 1;
+            if (!isValid(dateB)) return -1;
+            return dateB.getTime() - dateA.getTime(); // Sort newest to oldest for table
+        });
+        setStudentPracticeLogs(relevantLogs); // For table display
+
+        const assignmentStartDateForChart = startOfDay(parseISO(student.currentRoutineAssignmentDate));
+        const newChartData: DailyChartData[] = [];
+        for (let i = 0; i < 8; i++) {
+            const day = addDays(assignmentStartDateForChart, i);
+            const dayString = format(day, "yyyy-MM-dd");
+            
+            const logForDay = relevantLogs.find(log => log.date === dayString);
+            const actualPracticeTime = logForDay ? logForDay.logData.reduce((sum, entry) => sum + entry.timeSpentMinutes, 0) : 0;
+            
+            newChartData.push({
+                date: format(day, "E, MMM d", { locale: language === 'fa' ? faIR : undefined }),
+                actualPractice: actualPracticeTime,
+                idealDailyPractice: totalIdealDailyTimeForAssignedRoutine,
+            });
+        }
+        setChartData(newChartData);
+    } else {
+        setStudentPracticeLogs([]);
+        setChartData([]);
+    }
+  }, [student?.id, student?.currentRoutineId, student?.currentRoutineAssignmentDate, totalIdealDailyTimeForAssignedRoutine, language, logSubmissionCounter]);
+
+
+  const updateStudentProgress = () => {
+    if (!student || !student.currentRoutineId || !student.currentRoutineAssignmentDate) {
+      return 0; 
+    }
+
+    let idealTime = student.currentRoutineIdealWeeklyTime;
+
+    if ((!idealTime || idealTime === 0) && student.currentRoutineId) {
+        const allTemplates = getFromLocalStorage<RoutineTemplate[]>(LOCAL_STORAGE_ROUTINES_KEY, []);
+        const currentTemplate = allTemplates.find(t => t.id === student.currentRoutineId);
+        if (currentTemplate && currentTemplate.calculatedIdealWeeklyTime && currentTemplate.calculatedIdealWeeklyTime > 0) {
+            idealTime = currentTemplate.calculatedIdealWeeklyTime;
+            
+            let studentsToPatch = getFromLocalStorage<StudentData[]>(LOCAL_STORAGE_STUDENTS_KEY, []);
+            const studentIndexToPatch = studentsToPatch.findIndex(s => s.id === student.id);
+            if (studentIndexToPatch !== -1) {
+                studentsToPatch[studentIndexToPatch] = { 
+                    ...studentsToPatch[studentIndexToPatch], 
+                    currentRoutineIdealWeeklyTime: idealTime 
+                };
+                saveToLocalStorage(LOCAL_STORAGE_STUDENTS_KEY, studentsToPatch);
+            }
+        }
+    }
+    
+    if (!idealTime || idealTime === 0) { 
+        const allStudents = getFromLocalStorage<StudentData[]>(LOCAL_STORAGE_STUDENTS_KEY, []);
+        const updatedStudents = allStudents.map(s => {
+          if (s.id === student.id) {
+            return { ...s, currentRoutineProgressPercent: 0, currentRoutineIdealWeeklyTime: 0 };
+          }
+          return s;
+        });
+        saveToLocalStorage(LOCAL_STORAGE_STUDENTS_KEY, updatedStudents);
+        return 0;
+    }
+
+    const allPracticeLogs = getFromLocalStorage<DailyPracticeLog[]>(LOCAL_STORAGE_PRACTICE_LOGS_KEY, []);
+    const assignmentStartDate = startOfDay(parseISO(student.currentRoutineAssignmentDate));
+    const assignmentEndDate = endOfDay(addDays(assignmentStartDate, 7)); 
+
+    const relevantLogs = allPracticeLogs.filter(log =>
+      log.studentId === student.id &&
+      log.routineTemplateId === student.currentRoutineId &&
+      isValid(parseISO(log.date)) &&
+      isWithinInterval(parseISO(log.date), { start: assignmentStartDate, end: assignmentEndDate })
+    );
+
+    const totalActualPracticeTime = relevantLogs.reduce((totalSum, log) =>
+      totalSum + log.logData.reduce((logSum, entry) => logSum + entry.timeSpentMinutes, 0),
+      0
+    );
+    
+    const progressPercent = idealTime > 0 ? Math.min(100, Math.round((totalActualPracticeTime / idealTime) * 100)) : 0;
+
+    const allStudents = getFromLocalStorage<StudentData[]>(LOCAL_STORAGE_STUDENTS_KEY, []);
+    const updatedStudents = allStudents.map(s => {
+      if (s.id === student.id) {
+        return { ...s, currentRoutineProgressPercent: progressPercent, currentRoutineIdealWeeklyTime: idealTime };
+      }
+      return s;
+    });
+    saveToLocalStorage(LOCAL_STORAGE_STUDENTS_KEY, updatedStudents);
+    return progressPercent;
+  };
 
   const onSubmit: SubmitHandler<DailyPracticeLogInputs> = async (data) => {
     if (!student) {
@@ -159,10 +342,18 @@ export default function DailyPracticeLogPage() {
 
     try {
       let allLogs = getFromLocalStorage<DailyPracticeLog[]>(LOCAL_STORAGE_PRACTICE_LOGS_KEY, []);
-      allLogs = allLogs.filter(log => !(log.studentId === student.id && log.date === dateString));
+      allLogs = allLogs.filter(log => !(
+          log.studentId === student.id && 
+          log.date === dateString && 
+          log.routineTemplateId === student.currentRoutineId
+      ));
       allLogs.push(newLog);
       saveToLocalStorage(LOCAL_STORAGE_PRACTICE_LOGS_KEY, allLogs);
       
+      const newProgress = updateStudentProgress(); 
+      setDisplayProgressPercent(newProgress); 
+      setLogSubmissionCounter(prev => prev + 1);
+
       toast({
         title: t('student.practice.toast.saved.title'),
         description: t('student.practice.toast.saved.description', {date: format(data.date, "PPP", { locale: language === 'fa' ? faIR : undefined })}),
@@ -180,14 +371,11 @@ export default function DailyPracticeLogPage() {
     if (direction === 'prev') {
       newDate.setDate(currentDate.getDate() - 1);
       if (minLogDate && isBefore(startOfDay(newDate), startOfDay(minLogDate))) {
-        // Do not navigate before minLogDate, or set to minLogDate
-        // setCurrentDate(minLogDate); // Option: snap to boundary
-        return; // Option: just don't navigate
+        return; 
       }
     } else {
       newDate.setDate(currentDate.getDate() + 1);
       if (maxLogDate && isAfter(startOfDay(newDate), startOfDay(maxLogDate))) {
-         // Do not navigate after maxLogDate
         return;
       }
     }
@@ -208,6 +396,11 @@ export default function DailyPracticeLogPage() {
       {language === 'fa' ? <ChevronLeft className="h-5 w-5" /> : <ChevronRight className="h-5 w-5" />}
     </Button>
   );
+
+  const handleViewLogDetails = (log: DailyPracticeLog) => {
+    setSelectedLogForDetails(log);
+    setIsLogDetailsDialogOpen(true);
+  };
 
   if (isLoading) {
     return (
@@ -255,8 +448,26 @@ export default function DailyPracticeLogPage() {
           </CardDescription>
         </CardHeader>
 
+        <CardContent className="pt-6">
+          <div className="mb-6 p-4 border rounded-lg shadow-sm bg-background">
+            <div className="flex items-center justify-between mb-2">
+                <h3 className="text-lg font-semibold text-foreground flex items-center">
+                    <ListChecks className="mr-2 h-5 w-5 text-accent" />
+                    {t('student.practice.progress.title')}
+                </h3>
+                <span className="text-xl font-bold text-accent">{displayProgressPercent}%</span>
+            </div>
+            <Progress value={displayProgressPercent} className="w-full h-3" />
+            {student.currentRoutineIdealWeeklyTime && student.currentRoutineIdealWeeklyTime > 0 && (
+                 <p className="text-xs text-muted-foreground mt-2 text-center">
+                    {t('student.practice.progress.idealTimeNote', { time: student.currentRoutineIdealWeeklyTime })}
+                </p>
+            )}
+          </div>
+
+
         {!isCurrentDateLoggable && student.currentRoutineAssignmentDate && minLogDate && maxLogDate && (
-            <Alert variant="destructive" className="m-4">
+            <Alert variant="destructive" className="my-4">
               <Ban className="h-4 w-4" />
               <AlertTitle>{t('student.practice.logDateError.title')}</AlertTitle>
               <AlertDescription>
@@ -268,7 +479,7 @@ export default function DailyPracticeLogPage() {
             </Alert>
         )}
          {!student.currentRoutineAssignmentDate && student.currentRoutineId && (
-             <Alert variant="destructive" className="m-4">
+             <Alert variant="destructive" className="my-4">
                 <Ban className="h-4 w-4" />
                 <AlertTitle>{t('student.practice.logDateError.title')}</AlertTitle>
                 <AlertDescription>
@@ -279,7 +490,7 @@ export default function DailyPracticeLogPage() {
 
 
         <form onSubmit={handleSubmit(onSubmit)}>
-          <CardContent className="space-y-8 pt-6">
+          <div className="space-y-8">
             {fields.length === 0 && <p className="text-muted-foreground text-center">{t('student.practice.noSections')}</p>}
             {fields.map((field, index) => {
                 const sectionMeta = assignedRoutineDetails.sections.find(s => s.id === field.sectionId);
@@ -293,9 +504,15 @@ export default function DailyPracticeLogPage() {
                             <BookOpen className="mr-2 h-5 w-5 text-accent" />
                             {sectionMeta?.name || field.sectionName}
                         </h3>
-                        <p className="text-xs text-muted-foreground mt-1 sm:mt-0">
-                            {sectionMeta?.description}
-                        </p>
+                        <div className="text-xs text-muted-foreground mt-1 sm:mt-0 space-y-1 text-right">
+                           {sectionMeta?.description && <p>{sectionMeta.description}</p>}
+                           {sectionMeta?.idealDailyTimeMinutes && sectionMeta.idealDailyTimeMinutes > 0 && (
+                                <p className="italic text-accent">
+                                    <Info className="inline-block mr-1 h-3 w-3" />
+                                    {t('student.practice.idealTimePerSection', {time: sectionMeta.idealDailyTimeMinutes})}
+                                </p>
+                            )}
+                        </div>
                     </div>
                     
                     <div className="flex items-center space-x-3">
@@ -330,8 +547,8 @@ export default function DailyPracticeLogPage() {
                 disabled={!isCurrentDateLoggable}
               />
             </div>
-          </CardContent>
-          <CardFooter>
+          </div>
+          <CardFooter className="mt-6">
             <Button type="submit" className="w-full" disabled={isSubmitting || fields.length === 0 || !isCurrentDateLoggable}>
               {isSubmitting ? (
                  <>
@@ -346,8 +563,165 @@ export default function DailyPracticeLogPage() {
             </Button>
           </CardFooter>
         </form>
+        </CardContent>
       </Card>
+
+      {student?.currentRoutineAssignmentDate && assignedRoutineDetails && (
+        <Card className="shadow-xl mt-8">
+           <CardHeader>
+            <CardTitle className="flex items-center"><ListChecks className="mr-2 h-6 w-6 text-primary" /> {t('teacher.students.managePage.practiceProgress.title')}</CardTitle>
+            <CardDescription>{t('teacher.students.managePage.practiceProgress.description', { displayName: student.displayName })}</CardDescription>
+          </CardHeader>
+          <CardContent>
+            {studentPracticeLogs.length === 0 ? (
+                <p className="text-muted-foreground text-center py-4">{t('teacher.students.managePage.practiceProgress.noLogsForCurrent')}</p>
+            ) : (
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>{t('teacher.students.managePage.practiceProgress.table.date')}</TableHead>
+                  <TableHead className="hidden sm:table-cell">{t('teacher.students.managePage.practiceProgress.table.routine')}</TableHead>
+                  <TableHead className="text-right">{t('teacher.students.managePage.practiceProgress.table.time')}</TableHead>
+                   <TableHead className="text-right">{t('teacher.students.managePage.practiceProgress.table.details')}</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {studentPracticeLogs.slice(0, 5).map((log) => ( 
+                  <TableRow key={log.id}>
+                    <TableCell>{isValid(parseISO(log.date)) ? format(parseISO(log.date), "MMM d, yyyy", { locale: language === 'fa' ? faIR : undefined }) : t('teacher.students.managePage.practiceProgress.notApplicable')}</TableCell>
+                    <TableCell className="truncate max-w-[150px] hidden sm:table-cell">{log.routineName || t('teacher.students.managePage.practiceProgress.notApplicable')}</TableCell>
+                    <TableCell className="text-right">{log.logData.reduce((sum, entry) => sum + entry.timeSpentMinutes, 0)}</TableCell>
+                    <TableCell className="text-right">
+                        <Button variant="ghost" size="icon" title={t('teacher.students.managePage.practiceProgress.viewDetailsButton.title')} onClick={() => handleViewLogDetails(log)}>
+                            <Eye className="h-4 w-4" />
+                        </Button>
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+            )}
+          </CardContent>
+           {studentPracticeLogs.length > 5 && (
+            <CardFooter>
+                <Button variant="link" className="mx-auto" onClick={() => alert(t('teacher.students.managePage.practiceProgress.viewAllAlert'))}>{t('teacher.students.managePage.practiceProgress.viewAllButton')}</Button>
+            </CardFooter>
+           )}
+        </Card>
+      )}
+
+      {selectedLogForDetails && (
+        <Dialog open={isLogDetailsDialogOpen} onOpenChange={setIsLogDetailsDialogOpen}>
+          <DialogContent className="sm:max-w-md">
+            <DialogHeader>
+              <DialogTitle>{t('teacher.students.managePage.logDetails.title')}</DialogTitle>
+              <DialogDescription>
+                {t('teacher.students.managePage.logDetails.description', {
+                    date: isValid(parseISO(selectedLogForDetails.date)) ? format(parseISO(selectedLogForDetails.date), "PPP", { locale: language === 'fa' ? faIR : undefined }) : t('teacher.students.managePage.practiceProgress.notApplicable'),
+                    routineName: selectedLogForDetails.routineName || t('teacher.students.managePage.practiceProgress.notApplicable')
+                })}
+              </DialogDescription>
+            </DialogHeader>
+            <div className="space-y-4 py-4">
+                {selectedLogForDetails.dailyNotes && (
+                    <div>
+                        <h4 className="font-semibold">{t('teacher.students.managePage.logDetails.notesLabel')}</h4>
+                        <p className="text-sm text-muted-foreground p-2 border rounded-md bg-muted/50">
+                            {selectedLogForDetails.dailyNotes}
+                        </p>
+                    </div>
+                )}
+                 <div>
+                    <h4 className="font-semibold">{t('teacher.students.managePage.logDetails.sectionsLabel')}</h4>
+                    {selectedLogForDetails.logData.length > 0 ? (
+                        <ul className="space-y-2 mt-2">
+                            {selectedLogForDetails.logData.map(entry => (
+                                <li key={entry.sectionId} className="text-sm p-2 border rounded-md flex justify-between items-center">
+                                    <span>{entry.sectionName}</span>
+                                    <span className="font-medium text-primary">{t('teacher.students.managePage.logDetails.timeSpent', { time: entry.timeSpentMinutes })}</span>
+                                </li>
+                            ))}
+                        </ul>
+                    ) : (
+                        <p className="text-sm text-muted-foreground">{t('teacher.students.managePage.logDetails.noSectionsData')}</p>
+                    )}
+                </div>
+                 <div className="text-right font-semibold pt-2 border-t">
+                    {t('teacher.students.managePage.logDetails.totalTime', { time: selectedLogForDetails.logData.reduce((sum, entry) => sum + entry.timeSpentMinutes, 0) })}
+                </div>
+            </div>
+            <DialogFooter>
+                <DialogClose asChild>
+                    <Button type="button" variant="outline">
+                         {t('teacher.students.managePage.logDetails.closeButton')}
+                    </Button>
+                </DialogClose>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+      )}
+
+      {student?.currentRoutineAssignmentDate && assignedRoutineDetails && (
+        <Card className="shadow-xl mt-8">
+            <CardHeader>
+                <CardTitle className="flex items-center">
+                    <BarChart3 className="mr-2 h-6 w-6 text-primary" />
+                    {t('teacher.students.managePage.chart.title')} 
+                </CardTitle>
+                <CardDescription>
+                    {t('teacher.students.managePage.chart.description', { 
+                        routineName: assignedRoutineDetails.templateName || t('teacher.students.managePage.header.noRoutineAssigned'),
+                        startDate: format(parseISO(student.currentRoutineAssignmentDate), "PPP", { locale: language === 'fa' ? faIR : undefined })
+                    })}
+                </CardDescription>
+            </CardHeader>
+            <CardContent>
+                {chartData.length > 0 ? (
+                    <ChartContainer config={chartConfig} className="min-h-[200px] w-full">
+                        <ResponsiveContainer width="100%" height={300}>
+                            <BarChart data={chartData} margin={{ top: 5, right: 20, left: -10, bottom: 5 }}>
+                                <CartesianGrid vertical={false} strokeDasharray="3 3" />
+                                <XAxis 
+                                    dataKey="date" 
+                                    tickLine={false} 
+                                    axisLine={false} 
+                                    tickMargin={8}
+                                    tickFormatter={(value) => language === 'fa' ? value.split(',')[0] : value.substring(0,3)}
+                                />
+                                <YAxis 
+                                    tickLine={false} 
+                                    axisLine={false} 
+                                    tickMargin={8}
+                                    domain={[0, (dataMax: number) => Math.max(dataMax > 0 ? dataMax + 20 : 60, totalIdealDailyTimeForAssignedRoutine > 0 ? totalIdealDailyTimeForAssignedRoutine + 20 : 60)]}
+                                    label={{ value: t('teacher.students.managePage.chart.yAxisLabel'), angle: -90, position: 'insideLeft', offset: 0, style:{textAnchor: 'middle'} }}
+                                />
+                                <ChartTooltip
+                                    cursor={false}
+                                    content={<ChartTooltipContent 
+                                        indicator="dot" 
+                                        labelFormatter={(label, payload) => {
+                                            if (payload && payload.length) {
+                                                const matchingDataPoint = chartData.find(cd => (language === 'fa' ? cd.date.split(',')[0] : cd.date.substring(0,3)) === label);
+                                                return matchingDataPoint ? matchingDataPoint.date : label;
+                                            }
+                                            return label;
+                                        }}
+                                    />}
+                                />
+                                <Legend content={<ChartLegendContent />} />
+                                <Bar dataKey="actualPractice" fill="var(--color-actualPractice)" radius={4} />
+                                <Bar dataKey="idealDailyPractice" fill="var(--color-idealDailyPractice)" radius={4} />
+                            </BarChart>
+                        </ResponsiveContainer>
+                    </ChartContainer>
+                ) : (
+                    <p className="text-muted-foreground text-center py-4">{t('teacher.students.managePage.chart.noData')}</p> 
+                )}
+            </CardContent>
+        </Card>
+      )}
     </div>
   );
 }
 
+    

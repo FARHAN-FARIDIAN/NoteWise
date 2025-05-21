@@ -7,10 +7,10 @@ import { Calendar } from '@/components/ui/calendar';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Label } from '@/components/ui/label';
-import { ArrowLeft, CalendarIcon, UserCog, BookOpen, ListChecks, Eye, Loader2, AlertTriangle, X } from 'lucide-react';
+import { ArrowLeft, CalendarIcon, UserCog, BookOpen, ListChecks, Eye, Loader2, AlertTriangle, BarChart3 } from 'lucide-react';
 import Link from 'next/link';
 import { useState, useEffect, use } from 'react'; 
-import { format, startOfWeek, isValid, parseISO } from 'date-fns';
+import { format, startOfWeek, isValid, parseISO, isWithinInterval, addDays, startOfDay, endOfDay } from 'date-fns';
 import { faIR } from 'date-fns/locale/fa-IR';
 import { useToast } from '@/hooks/use-toast';
 import Image from 'next/image';
@@ -31,15 +31,31 @@ import {
   DialogFooter,
   DialogClose,
 } from "@/components/ui/dialog";
-import type { StudentData, RoutineTemplate, DailyPracticeLog } from '@/types';
+import {
+  ChartContainer,
+  ChartTooltip,
+  ChartTooltipContent,
+  ChartLegend,
+  ChartLegendContent,
+  ChartStyle,
+  type ChartConfig
+} from "@/components/ui/chart";
+import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from "recharts";
+import type { StudentData, RoutineTemplate, DailyPracticeLog, PracticeSection } from '@/types';
 import { getFromLocalStorage, saveToLocalStorage } from '@/lib/utils';
 import { LOCAL_STORAGE_STUDENTS_KEY, LOCAL_STORAGE_ROUTINES_KEY, LOCAL_STORAGE_PRACTICE_LOGS_KEY } from '@/lib/localStorageKeys';
 import { useTranslations } from '@/hooks/useTranslations';
 import { useLanguage } from '@/contexts/LanguageContext';
 
 
-export default function ManageStudentPage({ params }: { params: { studentId: string } }) {
-  const resolvedParams = use(params as any); // Use 'use' hook for params
+interface DailyChartData {
+  date: string;
+  actualPractice: number;
+  idealDailyPractice: number;
+}
+
+export default function ManageStudentPage({ params: paramsProp }: { params: { studentId: string } }) {
+  const resolvedParams = use(paramsProp as any); 
   const studentId = resolvedParams.studentId; 
   const { t } = useTranslations();
   const { toast } = useToast();
@@ -51,15 +67,24 @@ export default function ManageStudentPage({ params }: { params: { studentId: str
   const [studentPracticeLogs, setStudentPracticeLogs] = useState<DailyPracticeLog[]>([]);
   
   const [selectedTemplateId, setSelectedTemplateId] = useState<string | undefined>(undefined);
-  const [weekStartDate, setWeekStartDate] = useState<Date | undefined>(() => {
-    const today = new Date();
-    // Ensure week starts on Monday for consistency if using date-fns startOfWeek elsewhere
-    // For just default, new Date() is fine, calendar handles visual start of week.
-    return today; 
-  });
+  const [weekStartDate, setWeekStartDate] = useState<Date | undefined>(() => new Date());
   const [isAssigning, setIsAssigning] = useState(false);
   const [selectedLogForDetails, setSelectedLogForDetails] = useState<DailyPracticeLog | null>(null);
   const [isLogDetailsDialogOpen, setIsLogDetailsDialogOpen] = useState(false);
+
+  const [chartData, setChartData] = useState<DailyChartData[]>([]);
+  const [totalIdealDailyTimeForAssignedRoutine, setTotalIdealDailyTimeForAssignedRoutine] = useState<number>(0);
+
+  const chartConfig = {
+    actualPractice: {
+      label: t('teacher.students.managePage.chart.actualPracticeLabel'),
+      color: "hsl(var(--chart-1))",
+    },
+    idealDailyPractice: {
+      label: t('teacher.students.managePage.chart.idealPracticeLabel'),
+      color: "hsl(var(--chart-2))",
+    },
+  } satisfies ChartConfig;
 
 
   useEffect(() => {
@@ -67,9 +92,15 @@ export default function ManageStudentPage({ params }: { params: { studentId: str
       setIsLoadingStudent(true);
       const storedStudents = getFromLocalStorage<StudentData[]>(LOCAL_STORAGE_STUDENTS_KEY, []);
       const foundStudent = storedStudents.find(s => s.id === studentId);
+      
       if (foundStudent) {
         setCurrentStudentDetails(foundStudent);
         setSelectedTemplateId(foundStudent.currentRoutineId);
+         if (foundStudent.currentRoutineAssignmentDate && isValid(parseISO(foundStudent.currentRoutineAssignmentDate))) {
+          setWeekStartDate(parseISO(foundStudent.currentRoutineAssignmentDate));
+        } else {
+          setWeekStartDate(new Date()); 
+        }
       } else {
         setCurrentStudentDetails(null); 
         toast({ title: t('teacher.students.managePage.toast.error.general'), description: t('teacher.students.managePage.toast.error.studentNotFound'), variant: "destructive"});
@@ -77,21 +108,76 @@ export default function ManageStudentPage({ params }: { params: { studentId: str
 
       const templates = getFromLocalStorage<RoutineTemplate[]>(LOCAL_STORAGE_ROUTINES_KEY, []);
       setAvailableTemplates(templates);
-
-      const allLogs = getFromLocalStorage<DailyPracticeLog[]>(LOCAL_STORAGE_PRACTICE_LOGS_KEY, []);
-      const logsForStudent = allLogs.filter(log => log.studentId === studentId).sort((a,b) => {
-        const dateA = parseISO(a.date); 
-        const dateB = parseISO(b.date);
-        if (!isValid(dateA) && !isValid(dateB)) return 0;
-        if (!isValid(dateA)) return 1;
-        if (!isValid(dateB)) return -1;
-        return dateB.getTime() - dateA.getTime();
-      });
-      setStudentPracticeLogs(logsForStudent);
-
       setIsLoadingStudent(false);
     }
   }, [studentId, toast, t]);
+
+  useEffect(() => {
+    if (currentStudentDetails?.currentRoutineId && availableTemplates.length > 0) {
+        const assignedTemplate = availableTemplates.find(t => t.id === currentStudentDetails.currentRoutineId);
+        if (assignedTemplate && assignedTemplate.sections) {
+            const totalIdeal = assignedTemplate.sections.reduce((sum, section) => sum + (section.idealDailyTimeMinutes || 0), 0);
+            setTotalIdealDailyTimeForAssignedRoutine(totalIdeal);
+        } else {
+            setTotalIdealDailyTimeForAssignedRoutine(0);
+        }
+    } else {
+        setTotalIdealDailyTimeForAssignedRoutine(0);
+    }
+  }, [currentStudentDetails?.currentRoutineId, availableTemplates]);
+
+
+  useEffect(() => {
+    if (studentId && currentStudentDetails?.currentRoutineId && currentStudentDetails?.currentRoutineAssignmentDate) {
+        const allLogs = getFromLocalStorage<DailyPracticeLog[]>(LOCAL_STORAGE_PRACTICE_LOGS_KEY, []);
+        
+        const assignmentStart = startOfDay(parseISO(currentStudentDetails.currentRoutineAssignmentDate));
+        const assignmentEnd = endOfDay(addDays(assignmentStart, 7)); 
+
+        const logsForCurrentRoutineAssignment = allLogs.filter(log => 
+            log.studentId === studentId &&
+            log.routineTemplateId === currentStudentDetails.currentRoutineId &&
+            isValid(parseISO(log.date)) &&
+            isWithinInterval(parseISO(log.date), { start: assignmentStart, end: assignmentEnd })
+        ).sort((a,b) => {
+            const dateA = parseISO(a.date); 
+            const dateB = parseISO(b.date);
+            if (!isValid(dateA) && !isValid(dateB)) return 0;
+            if (!isValid(dateA)) return 1;
+            if (!isValid(dateB)) return -1;
+            return dateA.getTime() - dateB.getTime(); // Sort oldest to newest for chart
+        });
+        setStudentPracticeLogs(logsForCurrentRoutineAssignment);
+    } else {
+        setStudentPracticeLogs([]); 
+    }
+  }, [studentId, currentStudentDetails?.currentRoutineId, currentStudentDetails?.currentRoutineAssignmentDate]);
+
+
+  useEffect(() => {
+    if (currentStudentDetails?.currentRoutineAssignmentDate && isValid(parseISO(currentStudentDetails.currentRoutineAssignmentDate))) {
+        const assignmentStartDate = startOfDay(parseISO(currentStudentDetails.currentRoutineAssignmentDate));
+        const newChartData: DailyChartData[] = [];
+
+        for (let i = 0; i < 8; i++) {
+            const day = addDays(assignmentStartDate, i);
+            const dayString = format(day, "yyyy-MM-dd");
+            
+            const logForDay = studentPracticeLogs.find(log => log.date === dayString);
+            const actualPracticeTime = logForDay ? logForDay.logData.reduce((sum, entry) => sum + entry.timeSpentMinutes, 0) : 0;
+            
+            newChartData.push({
+                date: format(day, "E, MMM d", { locale: language === 'fa' ? faIR : undefined }),
+                actualPractice: actualPracticeTime,
+                idealDailyPractice: totalIdealDailyTimeForAssignedRoutine,
+            });
+        }
+        setChartData(newChartData);
+    } else {
+        setChartData([]);
+    }
+  }, [studentPracticeLogs, currentStudentDetails?.currentRoutineAssignmentDate, totalIdealDailyTimeForAssignedRoutine, language]);
+
 
   const handleAssignRoutine = () => {
     if (!selectedTemplateId || !weekStartDate || !currentStudentDetails) {
@@ -122,8 +208,10 @@ export default function ManageStudentPage({ params }: { params: { studentId: str
             ...student,
             currentRoutine: templateDetails.templateName,
             currentRoutineId: templateDetails.id,
-            currentRoutineAssignmentDate: weekStartDate.toISOString(), // Save assignment date
+            currentRoutineAssignmentDate: weekStartDate.toISOString(), 
             routinesAssigned: (student.routinesAssigned || 0) + 1,
+            currentRoutineProgressPercent: 0, 
+            currentRoutineIdealWeeklyTime: templateDetails.calculatedIdealWeeklyTime || 0, 
           };
         }
         return student;
@@ -133,7 +221,7 @@ export default function ManageStudentPage({ params }: { params: { studentId: str
         saveToLocalStorage(LOCAL_STORAGE_STUDENTS_KEY, updatedStudents);
         const updatedStudentDetails = updatedStudents.find(s => s.id === currentStudentDetails.id);
         if (updatedStudentDetails) {
-          setCurrentStudentDetails(updatedStudentDetails);
+          setCurrentStudentDetails(updatedStudentDetails); 
         }
         
         toast({
@@ -226,8 +314,8 @@ export default function ManageStudentPage({ params }: { params: { studentId: str
                           : t('teacher.students.managePage.practiceProgress.notApplicable') 
                   })}
                 </p>
+                 <p className="text-sm text-muted-foreground">{t('teacher.students.managePage.header.routinesAssigned', { count: displayStudent.routinesAssigned || 0 })}</p>
                 <p className="text-sm text-muted-foreground">{t('teacher.students.managePage.header.currentRoutine', { routineName: displayStudent.currentRoutine || t('teacher.students.managePage.header.noRoutineAssigned') })}</p>
-                <p className="text-sm text-muted-foreground">{t('teacher.students.managePage.header.routinesAssigned', { count: displayStudent.routinesAssigned || 0 })}</p>
                  {displayStudent.currentRoutineAssignmentDate && isValid(parseISO(displayStudent.currentRoutineAssignmentDate)) && (
                     <p className="text-sm text-muted-foreground italic">
                         {t('teacher.students.managePage.header.currentRoutineAssignedOn', { date: format(parseISO(displayStudent.currentRoutineAssignmentDate), "PPP", { locale: language === 'fa' ? faIR : undefined }) })}
@@ -307,13 +395,13 @@ export default function ManageStudentPage({ params }: { params: { studentId: str
           </CardHeader>
           <CardContent>
             {studentPracticeLogs.length === 0 ? (
-                <p className="text-muted-foreground text-center py-4">{t('teacher.students.managePage.practiceProgress.noLogs')}</p>
+                <p className="text-muted-foreground text-center py-4">{t('teacher.students.managePage.practiceProgress.noLogsForCurrent')}</p>
             ) : (
             <Table>
               <TableHeader>
                 <TableRow>
                   <TableHead>{t('teacher.students.managePage.practiceProgress.table.date')}</TableHead>
-                  <TableHead>{t('teacher.students.managePage.practiceProgress.table.routine')}</TableHead>
+                  <TableHead className="hidden sm:table-cell">{t('teacher.students.managePage.practiceProgress.table.routine')}</TableHead>
                   <TableHead className="text-right">{t('teacher.students.managePage.practiceProgress.table.time')}</TableHead>
                    <TableHead className="text-right">{t('teacher.students.managePage.practiceProgress.table.details')}</TableHead>
                 </TableRow>
@@ -322,7 +410,7 @@ export default function ManageStudentPage({ params }: { params: { studentId: str
                 {studentPracticeLogs.slice(0, 5).map((log) => ( 
                   <TableRow key={log.id}>
                     <TableCell>{isValid(parseISO(log.date)) ? format(parseISO(log.date), "MMM d, yyyy", { locale: language === 'fa' ? faIR : undefined }) : t('teacher.students.managePage.practiceProgress.notApplicable')}</TableCell>
-                    <TableCell className="truncate max-w-[150px]">{log.routineName || t('teacher.students.managePage.practiceProgress.notApplicable')}</TableCell>
+                    <TableCell className="truncate max-w-[150px] hidden sm:table-cell">{log.routineName || t('teacher.students.managePage.practiceProgress.notApplicable')}</TableCell>
                     <TableCell className="text-right">{log.logData.reduce((sum, entry) => sum + entry.timeSpentMinutes, 0)}</TableCell>
                     <TableCell className="text-right">
                         <Button variant="ghost" size="icon" title={t('teacher.students.managePage.practiceProgress.viewDetailsButton.title')} onClick={() => handleViewLogDetails(log)}>
@@ -342,6 +430,63 @@ export default function ManageStudentPage({ params }: { params: { studentId: str
            )}
         </Card>
       </div>
+
+      {currentStudentDetails.currentRoutineAssignmentDate && (
+        <Card className="shadow-lg">
+            <CardHeader>
+                <CardTitle className="flex items-center">
+                    <BarChart3 className="mr-2 h-6 w-6 text-primary" />
+                    {t('teacher.students.managePage.chart.title')}
+                </CardTitle>
+                <CardDescription>
+                    {t('teacher.students.managePage.chart.description', { 
+                        routineName: currentStudentDetails.currentRoutine || t('teacher.students.managePage.header.noRoutineAssigned'),
+                        startDate: format(parseISO(currentStudentDetails.currentRoutineAssignmentDate), "PPP", { locale: language === 'fa' ? faIR : undefined })
+                    })}
+                </CardDescription>
+            </CardHeader>
+            <CardContent>
+                {chartData.length > 0 ? (
+                    <ChartContainer config={chartConfig} className="min-h-[200px] w-full">
+                        <BarChart data={chartData} margin={{ top: 5, right: 20, left: -10, bottom: 5 }}>
+                            <CartesianGrid vertical={false} strokeDasharray="3 3" />
+                            <XAxis 
+                                dataKey="date" 
+                                tickLine={false} 
+                                axisLine={false} 
+                                tickMargin={8}
+                                tickFormatter={(value) => language === 'fa' ? value.split(',')[0] : value.substring(0,3)} // Shorten date for X-axis
+                            />
+                            <YAxis 
+                                tickLine={false} 
+                                axisLine={false} 
+                                tickMargin={8}
+                                domain={[0, (dataMax: number) => Math.max(dataMax, totalIdealDailyTimeForAssignedRoutine || 60)]} 
+                                label={{ value: t('teacher.students.managePage.chart.yAxisLabel'), angle: -90, position: 'insideLeft', offset: 0, style:{textAnchor: 'middle'} }}
+                            />
+                            <ChartTooltip
+                                cursor={false}
+                                content={<ChartTooltipContent 
+                                    indicator="dot" 
+                                    labelFormatter={(label, payload) => {
+                                        if (payload && payload.length) {
+                                            return `${payload[0].payload.date}`;
+                                        }
+                                        return label;
+                                    }}
+                                />}
+                            />
+                            <Legend content={<ChartLegendContent />} />
+                            <Bar dataKey="actualPractice" fill="var(--color-actualPractice)" radius={4} />
+                            <Bar dataKey="idealDailyPractice" fill="var(--color-idealDailyPractice)" radius={4} />
+                        </BarChart>
+                    </ChartContainer>
+                ) : (
+                    <p className="text-muted-foreground text-center py-4">{t('teacher.students.managePage.chart.noData')}</p>
+                )}
+            </CardContent>
+        </Card>
+      )}
 
       {selectedLogForDetails && (
         <Dialog open={isLogDetailsDialogOpen} onOpenChange={setIsLogDetailsDialogOpen}>
@@ -396,3 +541,4 @@ export default function ManageStudentPage({ params }: { params: { studentId: str
     </div>
   );
 }
+

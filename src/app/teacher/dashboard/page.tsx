@@ -12,12 +12,13 @@ import { getFromLocalStorage, saveToLocalStorage } from '@/lib/utils';
 import { LOCAL_STORAGE_STUDENTS_KEY } from '@/lib/localStorageKeys';
 import { useAuth } from '@/hooks/useAuth';
 import { useTranslations } from '@/hooks/useTranslations';
+import { Progress } from '@/components/ui/progress';
 
 const defaultTeacherUid = 'default-teacher-uid'; 
 const initialStudents: StudentData[] = [
-  { id: '1', uid: '1', displayName: 'Alice Wonderland', email: 'alice@example.com', avatar: 'https://placehold.co/100x100.png?text=AW', routinesAssigned: 0, status: 'Active', role: 'student', currentRoutine: 'Piano Basics Week 3', joinedDate: new Date().toISOString(), teacherId: defaultTeacherUid },
-  { id: '2', uid: '2', displayName: 'Bob The Builder', email: 'bob@example.com', avatar: 'https://placehold.co/100x100.png?text=BB', routinesAssigned: 0, status: 'Active', role: 'student', currentRoutine: 'Guitar Chords Level 1', joinedDate: new Date().toISOString(), teacherId: defaultTeacherUid },
-  { id: '3', uid: '3', displayName: 'Charlie Brown', email: 'charlie@example.com', avatar: 'https://placehold.co/100x100.png?text=CB', routinesAssigned: 0, status: 'Inactive', role: 'student', currentRoutine: 'Vocal Warmups Intermediate', joinedDate: new Date().toISOString(), teacherId: defaultTeacherUid },
+  { id: '1', uid: '1', displayName: 'Alice Wonderland', email: 'alice@example.com', avatar: 'https://placehold.co/100x100.png?text=AW', routinesAssigned: 0, status: 'Active', role: 'student', currentRoutine: 'Piano Basics Week 3', joinedDate: new Date().toISOString(), teacherId: defaultTeacherUid, currentRoutineProgressPercent: 25, currentRoutineIdealWeeklyTime: 240 },
+  { id: '2', uid: '2', displayName: 'Bob The Builder', email: 'bob@example.com', avatar: 'https://placehold.co/100x100.png?text=BB', routinesAssigned: 0, status: 'Active', role: 'student', currentRoutine: 'Guitar Chords Level 1', joinedDate: new Date().toISOString(), teacherId: defaultTeacherUid, currentRoutineProgressPercent: 60, currentRoutineIdealWeeklyTime: 180 },
+  { id: '3', uid: '3', displayName: 'Charlie Brown', email: 'charlie@example.com', avatar: 'https://placehold.co/100x100.png?text=CB', routinesAssigned: 0, status: 'Inactive', role: 'student', currentRoutine: 'Vocal Warmups Intermediate', joinedDate: new Date().toISOString(), teacherId: defaultTeacherUid, currentRoutineProgressPercent: 0, currentRoutineIdealWeeklyTime: 120 },
 ];
 
 
@@ -34,7 +35,13 @@ export default function TeacherDashboardPage() {
     let studentsToDisplay: StudentData[] = [];
 
     if (allStoredStudents.length === 0 && teacherData?.uid === defaultTeacherUid) {
-        const demoTeacherInitialStudents = initialStudents.filter(s => s.teacherId === defaultTeacherUid);
+        // Ensure initial students have progress fields
+        const demoTeacherInitialStudents = initialStudents.map(s => ({
+            ...s,
+            currentRoutineProgressPercent: s.currentRoutineProgressPercent || 0,
+            currentRoutineIdealWeeklyTime: s.currentRoutineIdealWeeklyTime || 0,
+        })).filter(s => s.teacherId === defaultTeacherUid);
+
         saveToLocalStorage(LOCAL_STORAGE_STUDENTS_KEY, demoTeacherInitialStudents); 
         studentsToDisplay = demoTeacherInitialStudents;
     } else {
@@ -113,17 +120,16 @@ export default function TeacherDashboardPage() {
                   <p className="text-sm text-muted-foreground">
                     Status: <span className={`font-medium ${student.status === 'Active' ? 'text-green-600' : 'text-red-600'}`}>{student.status}</span>
                   </p>
+                  <p className="text-xs text-muted-foreground">{t('teacherDashboard.progressLabel')}</p>
                   <div className="flex items-center gap-2">
-                     <div className="w-full bg-muted rounded-full h-2.5">
-                        <div className="bg-accent h-2.5 rounded-full" style={{width: `${Math.min(100, (student.routinesAssigned || 0) * 15 + 10)}%`}}></div>
-                    </div>
-                    <span className="text-xs text-accent-foreground">{Math.min(100, (student.routinesAssigned || 0) * 15 + 10)}%</span>
+                     <Progress value={student.currentRoutineProgressPercent || 0} className="w-full h-2.5" />
+                    <span className="text-xs text-accent-foreground">{student.currentRoutineProgressPercent || 0}%</span>
                   </div>
                 </CardContent>
                 <CardFooter className="p-4 border-t">
                   <Button variant="default" size="sm" asChild className="w-full">
                     <Link href={`/teacher/students/${student.id}`}>
-                      <Settings className="mr-2 h-4 w-4" /> Manage Student
+                      <Settings className="mr-2 h-4 w-4" /> {t('teacher.students.list.actions.manage.title')}
                     </Link>
                   </Button>
                 </CardFooter>
@@ -155,12 +161,14 @@ export default function TeacherDashboardPage() {
                             <p className="text-xs text-muted-foreground">{t('teacherDashboard.quickActions.viewProgress.description')}</p>
                         </div>
                 </Button>
-                 <Button variant="outline" className="w-full justify-start text-left h-auto py-3" disabled>
+                 <Button variant="outline" className="w-full justify-start text-left h-auto py-3" asChild>
+                      <Link href="/teacher/settings">
                         <Settings className="mr-3 h-5 w-5 text-primary"/>
                          <div>
                             <p className="font-semibold">{t('teacherDashboard.quickActions.accountSettings')}</p>
                             <p className="text-xs text-muted-foreground">{t('teacherDashboard.quickActions.accountSettings.description')}</p>
                         </div>
+                      </Link>
                 </Button>
             </CardContent>
         </Card>
