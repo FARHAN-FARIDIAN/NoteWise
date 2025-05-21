@@ -107,7 +107,7 @@ export default function HomePage() {
             <div className="flex flex-col items-center md:flex-row md:gap-12">
                 <div className="md:w-1/2 mb-8 md:mb-0">
                     <Image 
-                        src="/img1.png" 
+                        src="/img2.png" 
                         alt="Music practice illustration"
                         width={600}
                         height={400}

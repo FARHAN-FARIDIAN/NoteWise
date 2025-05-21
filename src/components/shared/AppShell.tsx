@@ -14,7 +14,7 @@ import {
   SidebarInset,
 } from "@/components/ui/sidebar";
 import Link from 'next/link';
-import { Home, Users, ListMusic, BookOpen, Settings, LogOut, UserCircle } from 'lucide-react';
+import { Home, Users, ListMusic, BookOpen, Settings, LogOut, UserCircle, Briefcase } from 'lucide-react';
 import { useAuth } from '@/hooks/useAuth';
 import { useRouter } from 'next/navigation';
 import { Button } from '../ui/button';
@@ -59,6 +59,11 @@ export function AppShell({ children, role }: AppShellProps) {
                   <SidebarMenuItem>
                     <SidebarMenuButton asChild tooltip={t('appShell.sidebar.routines')}>
                       <Link href="/teacher/routines"><ListMusic /><span>{t('appShell.sidebar.routines')}</span></Link>
+                    </SidebarMenuButton>
+                  </SidebarMenuItem>
+                  <SidebarMenuItem>
+                    <SidebarMenuButton asChild tooltip={t('teacher.resume.sidebarLink')}>
+                      <Link href="/teacher/resume"><Briefcase /><span>{t('teacher.resume.sidebarLink')}</span></Link>
                     </SidebarMenuButton>
                   </SidebarMenuItem>
                 </SidebarMenu>

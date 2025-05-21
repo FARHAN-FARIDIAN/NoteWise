@@ -16,7 +16,7 @@ import {
   DropdownMenuRadioItem,
 } from '@/components/ui/dropdown-menu';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
-import { LogOut, UserCircle, LayoutDashboard, Music, Users, Settings, Languages, Sun, Moon } from 'lucide-react';
+import { LogOut, UserCircle, LayoutDashboard, Music, Users, Settings, Languages, Sun, Moon, Briefcase } from 'lucide-react';
 import { useAuth } from '@/hooks/useAuth';
 import { Skeleton } from '@/components/ui/skeleton';
 import { useLanguage } from '@/contexts/LanguageContext';
@@ -91,6 +91,9 @@ export function Header() {
                   <Button variant="ghost" asChild>
                     <Link href="/teacher/routines">{t('header.routines')}</Link>
                   </Button>
+                   <Button variant="ghost" asChild>
+                    <Link href="/teacher/resume">{t('teacher.resume.sidebarLink')}</Link>
+                  </Button>
                 </div>
               )}
                {userData.role === 'student' && (
@@ -161,13 +164,23 @@ export function Header() {
                         <Music className="mr-2 h-4 w-4" />
                         <span>{t('header.routines')}</span>
                       </DropdownMenuItem>
+                       <DropdownMenuItem onClick={() => router.push('/teacher/resume')} className="md:hidden">
+                        <Briefcase className="mr-2 h-4 w-4" />
+                        <span>{t('teacher.resume.sidebarLink')}</span>
+                      </DropdownMenuItem>
                     </>
                   )}
                   {userData.role === 'student' && (
-                     <DropdownMenuItem onClick={() => router.push('/student/practice')}>
-                      <Music className="mr-2 h-4 w-4" />
-                      <span>{t('header.myPractice')}</span>
-                    </DropdownMenuItem>
+                     <>
+                      <DropdownMenuItem onClick={() => router.push('/student/practice')}>
+                        <Music className="mr-2 h-4 w-4" />
+                        <span>{t('header.myPractice')}</span>
+                      </DropdownMenuItem>
+                      <DropdownMenuItem onClick={() => router.push('/student/teacher-profile')}>
+                        <UserCircle className="mr-2 h-4 w-4" />
+                        <span>{t('student.teacherProfile.menuLink')}</span>
+                      </DropdownMenuItem>
+                     </>
                   )}
                   <DropdownMenuItem onClick={() => router.push(settingsPath)}>
                     <Settings className="mr-2 h-4 w-4" />
@@ -225,4 +238,3 @@ export function Header() {
     </header>
   );
 }
-

@@ -10,6 +10,20 @@ export interface Teacher extends User {
   role: 'teacher';
 }
 
+export interface TeacherResume {
+  id: string; // teacherUID, matches User['uid']
+  shortBio?: string;
+  instrumentsTaught?: string; // Comma-separated or similar
+  musicGenres?: string; // Comma-separated or similar
+  yearsTeaching?: number;
+  formalEducation?: string;
+  teachingPhilosophy?: string;
+  yearsPerforming?: number;
+  bandOrchestraMemberships?: string;
+  certifications?: string;
+  honorsMemberships?: string;
+}
+
 export interface StudentData {
   id: string; 
   uid?: string; 
@@ -21,6 +35,7 @@ export interface StudentData {
   status: 'Active' | 'Inactive';
   role: 'student';
   teacherId?: string; 
+  teacherName?: string; // Added to store the assigned teacher's display name
   currentRoutine?: string; 
   currentRoutineId?: string; 
   currentRoutineAssignmentDate?: string; // Date routine was assigned

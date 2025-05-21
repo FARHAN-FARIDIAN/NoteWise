@@ -47,14 +47,17 @@ export default function AddNewStudentPage() {
       id: newStudentId,
       uid: newStudentId, 
       displayName: data.fullName,
-      email: data.email,
-      password: data.initialPassword, // Save the actual password
+      email: data.email, // Already trimmed and lowercased by schema
+      password: data.initialPassword,
       avatar: `https://placehold.co/40x40.png?text=${initials}`,
       routinesAssigned: 0,
       status: 'Active',
       role: 'student',
-      joinedDate: new Date().toISOString(),
       teacherId: teacherData?.uid,
+      teacherName: teacherData?.displayName, // Store teacher's name
+      joinedDate: new Date().toISOString(),
+      currentRoutineProgressPercent: 0,
+      currentRoutineIdealWeeklyTime: 0,
     };
 
     try {
@@ -148,7 +151,7 @@ export default function AddNewStudentPage() {
                 className={errors.initialPassword ? "border-destructive" : ""}
               />
               {errors.initialPassword && <p className="text-sm text-destructive">{errors.initialPassword.message}</p>}
-              <p className="text-xs text-muted-foreground">{t('teacher.students.addPage.form.password.helpText')}</p>
+              <p className="text-xs text-muted-foreground">{t('teacher.students.addPage.form.password.helpTextNowSaves')}</p>
             </div>
 
             <Button type="submit" className="w-full" disabled={isSubmitting}>
